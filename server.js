@@ -41,6 +41,92 @@ async function initializeDatabase() {
 
 initializeDatabase();
 
+async function getOrCreatePlayer(gameName) {
+  if (!gameName) return null;
+
+  const name = String(gameName).trim().slice(0, 50);
+
+  if (!name) return null;
+
+  try {
+    const result = await db.query(
+      `
+      INSERT INTO players (game_name)
+      VALUES ($1)
+      ON CONFLICT (game_name)
+      DO UPDATE SET game_name = EXCLUDED.game_name
+      RETURNING *
+      `,
+      [name]
+    );
+
+    return result.rows[0];
+  } catch (error) {
+    console.error("Player database error:", error);
+    return null;
+  }
+}
+
+async function recordGameResult(winner, loser, draw = false) {
+  try {
+    if (!winner || !loser) {
+      console.error("Cannot record result: missing player name.");
+      return;
+    }
+
+    if (draw) {
+      await Promise.all([
+        db.query(
+          `
+          UPDATE players
+          SET draws = draws + 1,
+              games_played = games_played + 1
+          WHERE game_name = $1
+          `,
+          [winner]
+        ),
+        db.query(
+          `
+          UPDATE players
+          SET draws = draws + 1,
+              games_played = games_played + 1
+          WHERE game_name = $1
+          `,
+          [loser]
+        )
+      ]);
+
+      console.log(`Draw recorded: ${winner} vs ${loser}`);
+      return;
+    }
+
+    await Promise.all([
+      db.query(
+        `
+        UPDATE players
+        SET wins = wins + 1,
+            games_played = games_played + 1
+        WHERE game_name = $1
+        `,
+        [winner]
+      ),
+      db.query(
+        `
+        UPDATE players
+        SET losses = losses + 1,
+            games_played = games_played + 1
+        WHERE game_name = $1
+        `,
+        [loser]
+      )
+    ]);
+
+    console.log(`Result recorded: ${winner} won against ${loser}`);
+  } catch (error) {
+    console.error("Failed to record game result:", error);
+  }
+}
+
 function send(player, message) {
   if (player.readyState === WebSocket.OPEN) {
     player.send(JSON.stringify(message));
@@ -59,7 +145,8 @@ function createMatch(player1, player2) {
     id: matchId,
     white,
     black,
-    state: "active"
+    state: "active",
+    resultRecorded: false
   };
 
   matches.set(matchId, match);
@@ -130,7 +217,7 @@ server.on("connection", (socket) => {
     type: "CONNECTED"
   });
 
-  socket.on("message", (data) => {
+  socket.on("message", async (data) => {
     let message;
 
     try {
@@ -145,7 +232,11 @@ server.on("connection", (socket) => {
 
     if (message.type === "FIND_MATCH") {
       if (message.gameName) {
-        socket.gameName = String(message.gameName).trim().slice(0, 50);
+        socket.gameName = String(message.gameName)
+          .trim()
+          .slice(0, 50);
+
+        await getOrCreatePlayer(socket.gameName);
       }
 
       findOpponent(socket);

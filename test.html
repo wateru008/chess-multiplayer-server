@@ -5,28 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chess Multiplayer Test</title>
 </head>
+
 <body>
   <h1>Chess Multiplayer Test</h1>
 
   <p id="status">Connecting...</p>
   <p id="match">No match yet.</p>
+  <p id="events">No moves received yet.</p>
+
+  <button id="moveButton" disabled>Send Test Move</button>
 
   <script>
-    const SERVER_URL = "wss://chess-multiplayer-server-ok3x.onrender.com";
+    const SERVER_URL =
+      "wss://chess-multiplayer-server-ok3x.onrender.com";
 
     const status = document.getElementById("status");
     const match = document.getElementById("match");
+    const events = document.getElementById("events");
+    const moveButton = document.getElementById("moveButton");
+
+    let playerColor = null;
+    let matchId = null;
 
     const socket = new WebSocket(SERVER_URL);
 
     socket.addEventListener("open", () => {
-      status.textContent = "Connected to server.";
+      status.textContent = "Finding opponent...";
 
       socket.send(JSON.stringify({
         type: "FIND_MATCH"
       }));
-
-      status.textContent = "Finding opponent...";
     });
 
     socket.addEventListener("message", (event) => {
@@ -34,35 +42,57 @@
 
       console.log("Server:", message);
 
-      if (message.type === "CONNECTED") {
-        status.textContent = "Connected to server.";
-      }
-
-      if (message.type === "FINDING_OPPONENT") {
-        status.textContent = "Finding opponent...";
-      }
-
       if (message.type === "MATCH_FOUND") {
-        status.textContent = "Opponent found!";
+        playerColor = message.color;
+        matchId = message.matchId;
+
         match.textContent =
-          `Match ID: ${message.matchId} | Color: ${message.color}`;
+          `Match ID: ${matchId} | Color: ${playerColor}`;
       }
 
       if (message.type === "MATCH_START") {
-        status.textContent = "Match started!";
+        status.textContent =
+          `Match started! You are ${playerColor}.`;
+
+        moveButton.disabled = false;
+      }
+
+      if (message.type === "MOVE_MADE") {
+        events.textContent =
+          `Received move from opponent: ${JSON.stringify(message.move)}`;
       }
 
       if (message.type === "OPPONENT_DISCONNECTED") {
         status.textContent = "Opponent disconnected.";
+        moveButton.disabled = true;
       }
 
       if (message.type === "ERROR") {
-        status.textContent = "Server error: " + message.message;
+        status.textContent =
+          "Server error: " + message.message;
       }
+    });
+
+    moveButton.addEventListener("click", () => {
+      const testMove = {
+        from: "e2",
+        to: "e4",
+        player: playerColor,
+        timestamp: Date.now()
+      };
+
+      socket.send(JSON.stringify({
+        type: "MOVE_MADE",
+        move: testMove
+      }));
+
+      events.textContent =
+        `Sent move: ${JSON.stringify(testMove)}`;
     });
 
     socket.addEventListener("close", () => {
       status.textContent = "Disconnected from server.";
+      moveButton.disabled = true;
     });
 
     socket.addEventListener("error", () => {

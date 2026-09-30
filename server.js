@@ -1,6 +1,14 @@
 const WebSocket = require("ws");
+const { Pool } = require("pg");
 
 const PORT = process.env.PORT || 3000;
+
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 const server = new WebSocket.Server({
   port: PORT
@@ -11,6 +19,28 @@ const matches = new Map();
 
 console.log(`Chess multiplayer server running on port ${PORT}`);
 
+async function initializeDatabase() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS players (
+        id SERIAL PRIMARY KEY,
+        game_name VARCHAR(50) UNIQUE NOT NULL,
+        wins INTEGER NOT NULL DEFAULT 0,
+        losses INTEGER NOT NULL DEFAULT 0,
+        draws INTEGER NOT NULL DEFAULT 0,
+        games_played INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    console.log("PostgreSQL database initialized.");
+  } catch (error) {
+    console.error("Database initialization failed:", error);
+  }
+}
+
+initializeDatabase();
+
 function send(player, message) {
   if (player.readyState === WebSocket.OPEN) {
     player.send(JSON.stringify(message));
@@ -18,7 +48,9 @@ function send(player, message) {
 }
 
 function createMatch(player1, player2) {
-  const matchId = `match_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const matchId = `match_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
 
   const white = Math.random() < 0.5 ? player1 : player2;
   const black = white === player1 ? player2 : player1;
@@ -92,6 +124,7 @@ server.on("connection", (socket) => {
 
   socket.matchId = null;
   socket.color = null;
+  socket.gameName = null;
 
   send(socket, {
     type: "CONNECTED"
@@ -111,6 +144,10 @@ server.on("connection", (socket) => {
     }
 
     if (message.type === "FIND_MATCH") {
+      if (message.gameName) {
+        socket.gameName = String(message.gameName).trim().slice(0, 50);
+      }
+
       findOpponent(socket);
       return;
     }
